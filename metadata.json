@@ -1,0 +1,6 @@
+{
+  "name": "Trip Planner (SISTRAM Type 1)",
+  "description": "Calculate kinematics and format Brazilian SISTRAM Message Type 1 strings for maritime navigation systems.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
