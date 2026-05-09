@@ -1,6 +1,6 @@
 import { useState, useMemo, ChangeEvent } from 'react';
 import { Anchor, Navigation, Send, Hash, FileSymlink, Settings, MapPin, Calculator, Copy, Check, Wind, Waves, Compass, Activity, Zap } from 'lucide-react';
-import { generateSistramPlan, ShipData, GeneratorOutput, PT_MONTHS, calculateMaxSOG } from './lib/sistram';
+import { generateSistramPlan, ShipData, GeneratorOutput, PT_MONTHS, calculateMaxSOG, haversine } from './lib/sistram';
 import { getWaypointWeather, WeatherData } from './lib/weather';
 
 export default function App() {
@@ -13,16 +13,10 @@ export default function App() {
     arr_port: 'ROSARIO',
     medical: 'NURSE-ENFERMEIRO',
     mmsi: '710000200',
-    rpm: 92,
-    stw: 23.2,
-    sog: 23.2,
-    cog: 0,
-    hdg: 0,
-    draftFwd: 8.1,
-    draftAft: 8.1,
-    avgDraft: 8.1,
-    displacement: 50000,
+    disp: 50000,
+    draft: 8.1,
     windArea: 1000,
+    rpm: 92,
   });
 
   const initialEtd = new Date();
@@ -106,7 +100,8 @@ export default function App() {
   };
 
   const handleShipChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setShipData({ ...shipData, [e.target.name]: e.target.value.toUpperCase() });
+    const val = e.target.type === 'number' ? Number(e.target.value) : e.target.value.toUpperCase();
+    setShipData({ ...shipData, [e.target.name]: val });
   };
   
   const handleTimeChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -115,6 +110,68 @@ export default function App() {
       : e.target.value;
     setTimes({ ...times, [e.target.name]: val });
   };
+
+  const analytics = useMemo(() => {
+    if (!output || !waypointWeather) return null;
+    if (Object.keys(waypointWeather).length !== output.waypoints.length) return null;
+    if (output.waypoints.length < 2) return null;
+
+    let sum_d_n_over_sog = 0;
+    let totalDist = 0;
+    let ok = true;
+    
+    for (let i = 1; i < output.waypoints.length; i++) {
+        const prev = output.waypoints[i-1];
+        const curr = output.waypoints[i];
+        const w = waypointWeather[i];
+        if (!w || curr.bearingFromPrev === undefined || w.windSpeed === null) {
+            ok = false;
+            break;
+        }
+        
+        const d_n = haversine(prev.latDecl, prev.lonDecl, curr.latDecl, curr.lonDecl);
+        const maxSog = calculateMaxSOG(
+            shipData,
+            w.windSpeed,
+            w.windDirection,
+            w.waveHeight,
+            w.waveDirection,
+            w.wavePeriod,
+            w.currentVelocity,
+            w.currentDirection,
+            curr.bearingFromPrev
+        );
+        
+        if (maxSog <= 0) {
+           ok = false; break;
+        }
+        
+        totalDist += d_n;
+        sum_d_n_over_sog += (d_n / maxSog);
+    }
+    
+    if (!ok || sum_d_n_over_sog === 0) return null;
+    
+    const sogAvgMax = totalDist / sum_d_n_over_sog;
+    const weightedTotalEnrouteTime = sum_d_n_over_sog;
+    
+    const etdDate = new Date(times.etd);
+    const etdUtc = new Date(etdDate.getTime() + times.etdZone * 3600 * 1000);
+    const etaUtcEnv = new Date(etdUtc.getTime() + weightedTotalEnrouteTime * 3600 * 1000);
+    
+    const lastWp = output.waypoints[output.waypoints.length - 1];
+    const envEtaZone = Math.round(lastWp.lonDecl / 15);
+    const etaLocalEnv = new Date(etaUtcEnv.getTime() + envEtaZone * 3600 * 1000);
+    
+    return {
+       sogAvgMax,
+       weightedTotalEnrouteTime,
+       etaUtcEnv,
+       etaLocalEnv,
+       totalDist
+    };
+
+  }, [output, waypointWeather, shipData, times.etd, times.etdZone]);
 
   return (
     <div className="min-h-screen bg-[#05070a] text-slate-300 font-sans p-4 lg:p-6 flex flex-col gap-4 overflow-auto" style={{ backgroundImage: 'radial-gradient(circle at 50% -20%, #1e293b 0%, #05070a 60%)' }}>
@@ -160,6 +217,10 @@ export default function App() {
                   { id: 'medical', label: 'Medical Resources', type: 'text' },
                   { id: 'dep_port', label: 'Departure Port (G)', type: 'text' },
                   { id: 'arr_port', label: 'Arrival Port (I)', type: 'text' },
+                  { id: 'disp', label: 'Disp', type: 'number' },
+                  { id: 'draft', label: 'Draft', type: 'number' },
+                  { id: 'windArea', label: 'WindArea', type: 'number' },
+                  { id: 'rpm', label: 'RPM', type: 'number' },
                 ].map(field => (
                   <div key={field.id} className="flex flex-col gap-1">
                     <label className="text-[10px] font-bold text-slate-500 uppercase block tracking-widest">
@@ -172,41 +233,6 @@ export default function App() {
                       onChange={handleShipChange}
                       className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white font-mono outline-none focus:border-cyan-600 transition-colors uppercase placeholder:opacity-30"
                       placeholder={`Enter ${field.label}`}
-                    />
-                  </div>
-                ))}
-              </div>
-              
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-x-4 gap-y-3 mt-3 border-t border-slate-800 pt-4">
-                <h3 className="col-span-full mb-1 text-[10px] font-bold text-cyan-500/80 uppercase tracking-widest">Digital Twin Dynamics (Variable)</h3>
-                {[
-                  { id: 'rpm', label: 'RPM', type: 'number' },
-                  { id: 'stw', label: 'STW (kn)', type: 'number' },
-                  { id: 'sog', label: 'SOG (kn)', type: 'number' },
-                  { id: 'cog', label: 'COG (°)', type: 'number' },
-                  { id: 'hdg', label: 'HDG (°)', type: 'number' },
-                  { id: 'draftFwd', label: 'Draft FWD', type: 'number' },
-                  { id: 'draftAft', label: 'Draft AFT', type: 'number' },
-                  { id: 'avgDraft', label: 'Avg Draft', type: 'number' },
-                  { id: 'displacement', label: 'Disp. (mt)', type: 'number' },
-                  { id: 'windArea', label: 'Wind Area (m²)', type: 'number' },
-                ].map(field => (
-                  <div key={field.id} className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase block tracking-widest">
-                      {field.label}
-                    </label>
-                    <input
-                      type={field.type}
-                      name={field.id}
-                      value={shipData[field.id as keyof ShipData] || ''}
-                      onChange={(e) => {
-                         if (field.type === 'number') {
-                           setShipData({...shipData, [e.target.name]: parseFloat(e.target.value) || 0})
-                         } else {
-                           handleShipChange(e);
-                         }
-                      }}
-                      className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white font-mono outline-none focus:border-cyan-600 transition-colors"
                     />
                   </div>
                 ))}
@@ -225,11 +251,11 @@ export default function App() {
                 <div className="flex flex-col gap-3">
                     <h3 className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest border-b border-slate-800 pb-1">B - Departure (ETD)</h3>
                     <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Local Time</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">DEP_LT</label>
                         <input type="datetime-local" name="etd" value={times.etd} onChange={handleTimeChange} className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors" />
                     </div>
                     <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Zone (UTC Offset)</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Departure_UTC_Offset</label>
                         <select name="etdZone" value={times.etdZone} onChange={handleTimeChange} className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors">
                             {zones.map(z => <option key={z} value={z}>{z >= 0 ? `+${z}` : z}</option>)}
                         </select>
@@ -240,11 +266,11 @@ export default function App() {
                 <div className="flex flex-col gap-3">
                     <h3 className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest border-b border-slate-800 pb-1">I - Arrival (ETA)</h3>
                     <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Local Time</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">ETA_LT</label>
                         <input type="datetime-local" name="eta" value={times.eta} onChange={handleTimeChange} className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors" />
                     </div>
                     <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Zone (UTC Offset)</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Arrival_UTC_Offset</label>
                         <select name="etaZone" value={times.etaZone} onChange={handleTimeChange} className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors">
                             {zones.map(z => <option key={z} value={z}>{z >= 0 ? `+${z}` : z}</option>)}
                         </select>
@@ -255,11 +281,11 @@ export default function App() {
                 <div className="flex flex-col gap-3">
                     <h3 className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest border-b border-slate-800 pb-1">Transmission Time</h3>
                     <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Local Time</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">TT_LT</label>
                         <input type="datetime-local" name="sendTime" value={times.sendTime} onChange={handleTimeChange} className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors" />
                     </div>
                     <div className="flex flex-col gap-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Zone (UTC Offset)</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Transmission_UTC_Offset</label>
                         <select name="sendZone" value={times.sendZone} onChange={handleTimeChange} className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors">
                             {zones.map(z => <option key={z} value={z}>{z >= 0 ? `+${z}` : z}</option>)}
                         </select>
@@ -325,17 +351,47 @@ export default function App() {
                         </span>
                     </div>
                      <div className="flex justify-between items-end border-b border-slate-800 pb-2">
-                        <span className="text-xs text-slate-400">Total Enroute Time</span>
+                        <span className="text-xs text-slate-400">Req. Total Enroute Time</span>
                         <span className="text-lg font-mono text-white font-bold">
                             {output?.totalHours ? output.totalHours : '--'} <span className="text-[10px] text-slate-500">HRS</span>
                         </span>
                     </div>
                     <div className="flex justify-between items-end border-b border-slate-800 pb-2">
                         <span className="text-xs text-slate-400">Req. Avg Speed</span>
-                        <span className="text-lg font-mono text-amber-500 font-bold">
+                        <span className="text-lg font-mono text-white font-bold">
                             {output?.avgSpeed ? output.avgSpeed : '--'} <span className="text-[10px] text-slate-500">KTS</span>
                         </span>
                     </div>
+                    {analytics && (
+                      <>
+                        <div className="flex justify-between items-end border-b border-purple-900/50 pb-2 bg-purple-900/10 px-2 rounded-t">
+                            <span className="text-xs text-purple-400 flex items-center gap-1 font-bold"><Zap className="w-3 h-3"/> Env Avg Max SOG</span>
+                            <span className="text-lg font-mono text-purple-300 font-bold">
+                                {analytics.sogAvgMax.toFixed(2)} <span className="text-[10px] text-purple-500">KTS</span>
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-end border-b border-purple-900/50 pb-2 bg-purple-900/10 px-2">
+                            <span className="text-xs text-purple-400">Weighted Enroute Time</span>
+                            <span className="text-lg font-mono text-purple-300 font-bold">
+                                {analytics.weightedTotalEnrouteTime.toFixed(1)} <span className="text-[10px] text-purple-500">HRS</span>
+                            </span>
+                        </div>
+                        <div className="flex justify-between items-end border-b border-purple-900/50 pb-2 bg-purple-900/10 px-2 rounded-b">
+                            <span className="text-xs text-purple-400">Proposed ETA (EnviroETA)</span>
+                            <div className="text-right flex flex-col">
+                                <span className="text-lg font-mono text-purple-300 font-bold">
+                                    {analytics.etaUtcEnv.getUTCHours().toString().padStart(2, '0')}:{analytics.etaUtcEnv.getUTCMinutes().toString().padStart(2, '0')} Z
+                                    <span className="text-[10px] text-purple-500 ml-1">
+                                        {PT_MONTHS[analytics.etaUtcEnv.getUTCMonth()]} {analytics.etaUtcEnv.getUTCDate()}
+                                    </span>
+                                </span>
+                                <span className="text-[10px] font-mono text-purple-400/70">
+                                    {analytics.etaLocalEnv.getUTCHours().toString().padStart(2, '0')}:{analytics.etaLocalEnv.getUTCMinutes().toString().padStart(2, '0')} LT
+                                </span>
+                            </div>
+                        </div>
+                      </>
+                    )}
                 </div>
             </div>
 
@@ -407,7 +463,14 @@ export default function App() {
                             <span className="text-xs font-bold text-cyan-400 font-mono">
                               {wp.type === 'G' ? 'Waypoint 1 (Dep)' : wp.type === 'I' ? `Waypoint ${idx + 1} (Arr)` : `Waypoint ${idx + 1}`}
                             </span>
-                            <span className="text-[10px] text-slate-500 font-mono">ETA: {wp.timeUtc.getUTCHours().toString().padStart(2, '0')}Z / {PT_MONTHS[wp.timeUtc.getUTCMonth()]} {wp.timeUtc.getUTCDate()}</span>
+                            <div className="flex gap-3 items-center">
+                              {wp.bearingFromPrev !== undefined && (
+                                <span className="text-[10px] text-emerald-400 font-mono font-bold" title="Rumo em relação ao Norte Verdadeiro (RV)">
+                                  RV: {Math.round(wp.bearingFromPrev).toString().padStart(3, '0')}°
+                                </span>
+                              )}
+                              <span className="text-[10px] text-slate-500 font-mono">ETA: {wp.timeLocal.getUTCHours().toString().padStart(2, '0')}:{wp.timeLocal.getUTCMinutes().toString().padStart(2, '0')} / {PT_MONTHS[wp.timeLocal.getUTCMonth()]} {wp.timeLocal.getUTCDate()}</span>
+                            </div>
                           </div>
                           
                           {weather ? (

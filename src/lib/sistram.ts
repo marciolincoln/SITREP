@@ -7,16 +7,10 @@ export interface ShipData {
   arr_port: string;
   medical: string;
   mmsi: string;
-  rpm: number;
-  stw: number;
-  sog: number;
-  cog: number;
-  hdg: number;
-  draftFwd: number;
-  draftAft: number;
-  avgDraft: number;
-  displacement: number;
+  disp: number;
+  draft: number;
   windArea: number;
+  rpm: number;
 }
 
 export interface Waypoint {
@@ -30,6 +24,7 @@ export interface WaypointDetail {
   latDecl: number;
   lonDecl: number;
   timeUtc: Date;
+  timeLocal: Date;
   type: 'G' | 'L' | 'I';
   bearingFromPrev?: number;
 }
@@ -69,7 +64,7 @@ export function calculateBearing(lat1: number, lon1: number, lat2: number, lon2:
 }
 
 export function calculateMaxSOG(
-  shipData: ShipData, 
+  shipData: ShipData,
   windSpeedKnots: number | null,
   windDirDeg: number | null,
   waveHeightM: number | null,
@@ -91,9 +86,9 @@ export function calculateMaxSOG(
   const A = 0.7;
   const sigma = 1.5;
 
-  const avgDraft = shipData.avgDraft || 8.1;
+  const avgDraft = shipData.draft || 8.1;
   const rpm = shipData.rpm || 92;
-  const disp = shipData.displacement || 50000;
+  const disp = shipData.disp || 50000;
   
   const vCalm = BASE_SPEED - (DRAFT_COEFF * Math.pow(avgDraft - 8.1, 2)) - (DISP_COEFF * Math.pow(disp, 2 / 3));
   const stwBase = vCalm * Math.pow(rpm / 92, RPM_EXPONENT);
@@ -111,7 +106,7 @@ export function calculateMaxSOG(
 
   const waveHeight = waveHeightM || 0;
   const waveDir = waveDirDeg ?? cog;
-  const wavePeriod = wavePeriodS || 8;
+  const wavePeriod = wavePeriodS || 8.1;
   
   const resFactor = 1 + A * Math.exp(-Math.pow(wavePeriod - Tn, 2) / (2 * Math.pow(sigma, 2)));
   const dWave = -k_h * Math.pow(waveHeight, 1.1) * Math.cos((cog - waveDir) * Math.PI / 180) * resFactor;
@@ -188,12 +183,15 @@ export function generateSistramPlan(
   try {
     const etdUtc = new Date(times.etd + ':00Z');
     etdUtc.setUTCHours(etdUtc.getUTCHours() - times.etdZone);
+    const etdLocal = new Date(times.etd + ':00Z');
     
     const etaUtc = new Date(times.eta + ':00Z');
     etaUtc.setUTCHours(etaUtc.getUTCHours() - times.etaZone);
+    const etaLocal = new Date(times.eta + ':00Z');
     
     const sendUtc = new Date(times.sendTime + ':00Z');
     sendUtc.setUTCHours(sendUtc.getUTCHours() - times.sendZone);
+    const sendLocal = new Date(times.sendTime + ':00Z');
     
     const totalDurationHrs = (etaUtc.getTime() - etdUtc.getTime()) / (1000 * 3600);
     if (totalDurationHrs <= 0) {
@@ -228,10 +226,11 @@ export function generateSistramPlan(
     const msg: string[] = [];
     const waypoints: WaypointDetail[] = [];
 
-    msg.push(`SISTRAM/1/${formatSistramDate(sendUtc)}/REF//`);
+    msg.push(`SISTRAM/1/${formatSistramDate(sendUtc)}//`);
     msg.push(`A/${shipData.callsign}/${shipData.name}/${shipData.flag}/${shipData.type}//`);
     msg.push(`B/${formatSistramDate(etdUtc)}//`);
     msg.push(`G/${shipData.dep_port}/${coords[0].latS}/${coords[0].lonS}//`);
+    msg.push(`I/${shipData.arr_port}/${coords[coords.length-1].latS}/${coords[coords.length-1].lonS}/${formatSistramDate(etaUtc)}//`);
     
     waypoints.push({
       latS: coords[0].latS,
@@ -239,6 +238,7 @@ export function generateSistramPlan(
       latDecl: coords[0].lat,
       lonDecl: coords[0].lon,
       timeUtc: etdUtc,
+      timeLocal: etdLocal,
       type: 'G'
     });
 
@@ -247,6 +247,10 @@ export function generateSistramPlan(
         cumulativeDist += legDistances[i];
         const timeOffset = (cumulativeDist / totalDist) * totalDurationHrs;
         const wpTime = new Date(etdUtc.getTime() + timeOffset * 3600 * 1000);
+        
+        const wpZone = Math.round(coords[i].lon / 15);
+        const wpTimeLocal = new Date(wpTime.getTime() + wpZone * 3600 * 1000);
+
         msg.push(`L/${coords[i].latS}/${coords[i].lonS}/${formatSistramDate(wpTime)}//`);
         waypoints.push({
           latS: coords[i].latS,
@@ -254,18 +258,19 @@ export function generateSistramPlan(
           latDecl: coords[i].lat,
           lonDecl: coords[i].lon,
           timeUtc: wpTime,
+          timeLocal: wpTimeLocal,
           type: 'L',
           bearingFromPrev: calculateBearing(coords[i-1].lat, coords[i-1].lon, coords[i].lat, coords[i].lon)
         });
     }
 
-    msg.push(`I/${shipData.arr_port}/${coords[coords.length-1].latS}/${coords[coords.length-1].lonS}/${formatSistramDate(etaUtc)}//`);
     waypoints.push({
       latS: coords[coords.length-1].latS,
       lonS: coords[coords.length-1].lonS,
       latDecl: coords[coords.length-1].lat,
       lonDecl: coords[coords.length-1].lon,
       timeUtc: etaUtc,
+      timeLocal: etaLocal,
       type: 'I',
       bearingFromPrev: calculateBearing(coords[coords.length-2].lat, coords[coords.length-2].lon, coords[coords.length-1].lat, coords[coords.length-1].lon)
     });
