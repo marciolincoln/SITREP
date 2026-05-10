@@ -1,1 +1,69 @@
 @import "tailwindcss";
+
+.react-datepicker-wrapper {
+  width: 100%;
+}
+
+.react-datepicker {
+  @apply bg-slate-900 border border-slate-700 rounded-lg text-slate-300 font-sans shadow-xl;
+}
+
+.react-datepicker__header {
+  @apply bg-slate-800 border-b border-slate-700 rounded-t-lg pt-2;
+}
+
+.react-datepicker__current-month,
+.react-datepicker-time__header,
+.react-datepicker-year-header {
+  @apply text-slate-200 font-bold tracking-wider;
+}
+
+.react-datepicker__day-name,
+.react-datepicker__day,
+.react-datepicker__time-name {
+  @apply text-slate-400 font-mono text-sm;
+}
+
+.react-datepicker__day:hover,
+.react-datepicker__month-text:hover,
+.react-datepicker__quarter-text:hover,
+.react-datepicker__year-text:hover {
+  @apply bg-slate-700 text-white rounded;
+}
+
+.react-datepicker__day--selected,
+.react-datepicker__day--in-selecting-range,
+.react-datepicker__day--in-range,
+.react-datepicker__month-text--selected,
+.react-datepicker__quarter-text--selected,
+.react-datepicker__year-text--selected {
+  @apply bg-cyan-600 text-white font-bold rounded;
+}
+
+.react-datepicker__day--keyboard-selected,
+.react-datepicker__month-text--keyboard-selected,
+.react-datepicker__quarter-text--keyboard-selected,
+.react-datepicker__year-text--keyboard-selected {
+  @apply bg-cyan-700 text-white rounded;
+}
+
+.react-datepicker__time-container {
+  @apply border-l border-slate-700;
+}
+
+.react-datepicker__time-container .react-datepicker__time {
+  @apply bg-slate-900;
+}
+
+.react-datepicker__time-container .react-datepicker__time .react-datepicker__time-box ul.react-datepicker__time-list li.react-datepicker__time-list-item {
+  @apply text-slate-300 font-mono text-xs cursor-pointer;
+}
+
+.react-datepicker__time-container .react-datepicker__time .react-datepicker__time-box ul.react-datepicker__time-list li.react-datepicker__time-list-item:hover {
+  @apply bg-slate-800 text-white;
+}
+
+.react-datepicker__time-container .react-datepicker__time .react-datepicker__time-box ul.react-datepicker__time-list li.react-datepicker__time-list-item--selected {
+  @apply bg-cyan-600 font-bold text-white;
+}
+

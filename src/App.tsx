@@ -1,9 +1,15 @@
-import { useState, useMemo, ChangeEvent } from 'react';
-import { Anchor, Navigation, Send, Hash, FileSymlink, Settings, MapPin, Calculator, Copy, Check, Wind, Waves, Compass, Activity, Zap } from 'lucide-react';
+import { useState, useMemo, ChangeEvent, useEffect } from 'react';
+import { Anchor, Navigation, Send, Hash, FileSymlink, Settings, MapPin, Calculator, Copy, Check, Wind, Waves, Compass, Activity, Zap, BookOpen, Save, Trash, Plus } from 'lucide-react';
+import DatePicker from 'react-datepicker';
+import "react-datepicker/dist/react-datepicker.css";
 import { generateSistramPlan, ShipData, GeneratorOutput, PT_MONTHS, calculateMaxSOG, haversine } from './lib/sistram';
 import { getWaypointWeather, WeatherData } from './lib/weather';
+import { RouteMap } from './components/MapComponent';
+import { EccodaxLogo } from './components/EccodaxLogo';
+import { ManualModal } from './components/ManualModal';
 
 export default function App() {
+  const [isManualOpen, setIsManualOpen] = useState(false);
   const [shipData, setShipData] = useState<ShipData>({
     name: 'MERCOSUL ITAJAI',
     callsign: 'PPKQ',
@@ -18,6 +24,45 @@ export default function App() {
     windArea: 1000,
     rpm: 92,
   });
+
+  const [savedProfiles, setSavedProfiles] = useState<Record<string, ShipData>>({});
+  const [profileName, setProfileName] = useState('');
+
+  useEffect(() => {
+    const loaded = localStorage.getItem('sistram_profiles');
+    if (loaded) {
+      try {
+        setSavedProfiles(JSON.parse(loaded));
+      } catch (e) {
+        console.error('Failed to load profiles');
+      }
+    }
+  }, []);
+
+  const saveProfile = () => {
+    if (!profileName.trim()) return alert('Insira um nome para a viagem/perfil');
+    const newProfiles = { ...savedProfiles, [profileName.trim()]: shipData };
+    setSavedProfiles(newProfiles);
+    localStorage.setItem('sistram_profiles', JSON.stringify(newProfiles));
+  };
+  
+  const loadProfile = (name: string) => {
+    if (name && savedProfiles[name]) {
+      setShipData(savedProfiles[name]);
+      setProfileName(name);
+    } else {
+       setProfileName('');
+    }
+  };
+
+  const deleteProfile = (name: string) => {
+    if (!name) return;
+    const newProfiles = { ...savedProfiles };
+    delete newProfiles[name];
+    setSavedProfiles(newProfiles);
+    localStorage.setItem('sistram_profiles', JSON.stringify(newProfiles));
+    if (profileName === name) setProfileName('');
+  };
 
   const initialEtd = new Date();
   const initialEta = new Date(initialEtd.getTime() + 24 * 60 * 60 * 1000);
@@ -176,16 +221,22 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#05070a] text-slate-300 font-sans p-4 lg:p-6 flex flex-col gap-4 overflow-auto" style={{ backgroundImage: 'radial-gradient(circle at 50% -20%, #1e293b 0%, #05070a 60%)' }}>
       {/* Header */}
-      <header className="flex flex-col sm:flex-row sm:justify-between sm:items-end border-b border-cyan-900/50 pb-4 shrink-0">
-        <div className="flex flex-col">
-          <h1 className="text-xs font-mono tracking-widest text-cyan-500 uppercase flex items-center gap-2">
-            Navigational Engineering Specialist
-          </h1>
-          <h2 className="text-2xl font-light text-white tracking-tight mt-1">
-            SISTRAM <span className="text-cyan-500 font-bold italic">Type 1</span> Message Generator
-          </h2>
+      <header className="flex flex-col sm:flex-row sm:justify-between sm:items-center border-b border-cyan-900/50 pb-4 shrink-0">
+        <div className="flex items-center gap-4">
+          <EccodaxLogo className="w-12 h-12" />
+          <div className="flex flex-col">
+            <h1 className="text-xs font-mono tracking-widest text-cyan-500 uppercase flex items-center gap-2">
+              Navigational Engineering Specialist
+            </h1>
+            <h2 className="text-2xl font-light text-white tracking-tight mt-1 flex items-center gap-3">
+              SISTRAM <span className="text-cyan-500 font-bold italic">Type 1</span>
+              <button onClick={() => setIsManualOpen(true)} className="text-[10px] bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded text-slate-300 transition-colors flex items-center gap-1 font-bold tracking-wider ml-2">
+                 <BookOpen className="w-3 h-3 text-cyan-400" /> MANUAL
+              </button>
+            </h2>
+          </div>
         </div>
-        <div className="text-right mt-2 sm:mt-0">
+        <div className="text-right mt-2 sm:mt-0 flex flex-col items-end">
           <div className="text-[10px] font-mono text-slate-500 uppercase">System Status</div>
           <div className="text-emerald-500 flex items-center gap-2 text-xs font-mono">
             <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></span>
@@ -202,9 +253,36 @@ export default function App() {
             
             {/* Section 1: Ship Data */}
             <section className="bg-slate-900/40 p-4 rounded-lg border border-slate-800 flex flex-col gap-3">
-              <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2">
-                <Navigation className="w-4 h-4 text-cyan-500" />
-                <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ship Static & Variable Data</h2>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-2 border-b border-slate-800 pb-2 gap-2">
+                <div className="flex items-center gap-2">
+                  <Navigation className="w-4 h-4 text-cyan-500" />
+                  <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Ship Static & Variable Data</h2>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                   <select 
+                     value={savedProfiles[profileName] ? profileName : ""} 
+                     onChange={(e) => loadProfile(e.target.value)}
+                     className="bg-black/40 border border-slate-700 rounded px-2 py-1 text-xs text-white outline-none focus:border-cyan-600 transition-colors w-32"
+                   >
+                     <option value="">-- Saved Profiles --</option>
+                     {Object.keys(savedProfiles).map(p => <option key={p} value={p}>{p}</option>)}
+                   </select>
+                   <input
+                     type="text"
+                     placeholder="Profile Name"
+                     value={profileName}
+                     onChange={(e) => setProfileName(e.target.value)}
+                     className="bg-black/40 border border-slate-700 rounded px-2 py-1 text-xs text-white outline-none focus:border-cyan-600 transition-colors w-24"
+                   />
+                   <button onClick={saveProfile} className="text-[10px] bg-slate-800 hover:bg-slate-700 px-2 py-1.5 rounded text-cyan-400 transition-colors flex items-center gap-1 font-bold" title="Save profile">
+                     <Save className="w-3 h-3" /> Save
+                   </button>
+                   {savedProfiles[profileName] && (
+                     <button onClick={() => deleteProfile(profileName)} className="text-[10px] bg-slate-800 hover:bg-slate-700 px-2 py-1.5 rounded text-red-400 transition-colors flex items-center gap-1 font-bold" title="Delete profile">
+                       <Trash className="w-3 h-3" /> Delete
+                     </button>
+                   )}
+                </div>
               </div>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 mt-1">
@@ -252,7 +330,15 @@ export default function App() {
                     <h3 className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest border-b border-slate-800 pb-1">B - Departure (ETD)</h3>
                     <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">DEP_LT</label>
-                        <input type="datetime-local" name="etd" value={times.etd} onChange={handleTimeChange} className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors" />
+                        <DatePicker
+                           selected={new Date(times.etd)}
+                           onChange={(date: Date | null) => date && setTimes({...times, etd: formatLocal(date)})}
+                           showTimeSelect
+                           timeFormat="HH:mm"
+                           timeIntervals={15}
+                           dateFormat="yyyy-MM-dd HH:mm"
+                           className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors cursor-pointer"
+                        />
                     </div>
                     <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Departure_UTC_Offset</label>
@@ -267,7 +353,15 @@ export default function App() {
                     <h3 className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest border-b border-slate-800 pb-1">I - Arrival (ETA)</h3>
                     <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">ETA_LT</label>
-                        <input type="datetime-local" name="eta" value={times.eta} onChange={handleTimeChange} className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors" />
+                        <DatePicker
+                           selected={new Date(times.eta)}
+                           onChange={(date: Date | null) => date && setTimes({...times, eta: formatLocal(date)})}
+                           showTimeSelect
+                           timeFormat="HH:mm"
+                           timeIntervals={15}
+                           dateFormat="yyyy-MM-dd HH:mm"
+                           className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors cursor-pointer"
+                        />
                     </div>
                     <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Arrival_UTC_Offset</label>
@@ -282,7 +376,15 @@ export default function App() {
                     <h3 className="text-[10px] font-bold text-cyan-500 uppercase tracking-widest border-b border-slate-800 pb-1">Transmission Time</h3>
                     <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">TT_LT</label>
-                        <input type="datetime-local" name="sendTime" value={times.sendTime} onChange={handleTimeChange} className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors" />
+                        <DatePicker
+                           selected={new Date(times.sendTime)}
+                           onChange={(date: Date | null) => date && setTimes({...times, sendTime: formatLocal(date)})}
+                           showTimeSelect
+                           timeFormat="HH:mm"
+                           timeIntervals={15}
+                           dateFormat="yyyy-MM-dd HH:mm"
+                           className="w-full bg-black/40 border border-slate-700 rounded p-2 text-xs text-white outline-none focus:border-cyan-600 transition-colors cursor-pointer"
+                        />
                     </div>
                     <div className="flex flex-col gap-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Transmission_UTC_Offset</label>
@@ -331,6 +433,17 @@ export default function App() {
                   </button>
                </div>
             </section>
+
+            {/* Map Component */}
+            {output && output.waypoints.length > 0 && (
+              <section className="bg-slate-900/40 p-4 rounded-lg border border-slate-800 flex flex-col gap-3">
+                <div className="flex items-center gap-2 mb-2 border-b border-slate-800 pb-2">
+                  <Compass className="w-4 h-4 text-cyan-500" />
+                  <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Geospatial Overview</h2>
+                </div>
+                <RouteMap output={output} waypointWeather={waypointWeather} />
+              </section>
+            )}
 
           </div>
 
@@ -544,13 +657,20 @@ export default function App() {
       </main>
 
       <footer className="flex flex-col sm:flex-row sm:justify-between sm:items-center text-[10px] font-mono text-slate-600 border-t border-slate-900 pt-3 mt-2 shrink-0 gap-2">
-        <div>MMSI: {shipData.mmsi || '------'} | CALLSIGN: {shipData.callsign || '----'} | FLAG: {shipData.flag || '--'}</div>
+        <div className="flex flex-col gap-1">
+           <div>MMSI: {shipData.mmsi || '------'} | CALLSIGN: {shipData.callsign || '----'} | FLAG: {shipData.flag || '--'}</div>
+           <div className="opacity-60 italic text-[9px]">
+             Geospatial metocean data provided by <a href="https://open-meteo.com/" target="_blank" rel="noreferrer" className="text-cyan-500 hover:underline">Open-Meteo API</a>.
+           </div>
+        </div>
         <div className="flex gap-4">
           <span>SISTRAM v1.0.0</span>
           <span className="text-slate-700">LAT/LON PARSER: <span className="text-emerald-700">OK</span></span>
           <span className="text-slate-700">TIME ENGINE: <span className="text-emerald-700">SYNC</span></span>
         </div>
       </footer>
+      
+      {isManualOpen && <ManualModal onClose={() => setIsManualOpen(false)} />}
     </div>
   );
 }
