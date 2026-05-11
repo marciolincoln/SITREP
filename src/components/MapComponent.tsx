@@ -16,9 +16,10 @@ L.Icon.Default.mergeOptions({
 interface MapProps {
   output: GeneratorOutput | null;
   waypointWeather: Record<number, WeatherData | null>;
+  analytics?: any;
 }
 
-export function RouteMap({ output, waypointWeather }: MapProps) {
+export function RouteMap({ output, waypointWeather, analytics }: MapProps) {
   if (!output || output.waypoints.length === 0) {
     return (
       <div className="w-full h-[400px] flex items-center justify-center bg-slate-900 border border-slate-800 rounded-lg">
@@ -51,6 +52,8 @@ export function RouteMap({ output, waypointWeather }: MapProps) {
 
         {output.waypoints.map((wp, idx) => {
           const w = waypointWeather[idx];
+          const wpDetail = analytics?.wpDetails?.[idx];
+          const isCritical = wpDetail?.critical?.flags?.length > 0;
           
           // Create a custom icon showing wind vector if we have weather
           let customIcon;
@@ -58,9 +61,9 @@ export function RouteMap({ output, waypointWeather }: MapProps) {
              const waveScale = Math.min((w.waveHeight ?? 0) * 8, 40); // cap size
              const windIconHtml = `
                <div style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; position: relative;">
-                 ${w.waveHeight ? `<div style="position: absolute; width: ${waveScale}px; height: ${waveScale}px; border-radius: 50%; border: 1px dashed rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.1);"></div>` : ''}
+                 ${w.waveHeight ? `<div style="position: absolute; width: ${waveScale}px; height: ${waveScale}px; border-radius: 50%; border: 1px dashed ${isCritical ? 'rgba(239, 68, 68, 0.6)' : 'rgba(56, 189, 248, 0.4)'}; background: ${isCritical ? 'rgba(239, 68, 68, 0.2)' : 'rgba(56, 189, 248, 0.1)'};"></div>` : ''}
                  <div style="transform: rotate(${w.windDirection}deg); width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; z-index: 10;">
-                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${isCritical ? '#fca5a5' : '#22d3ee'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <line x1="12" y1="19" x2="12" y2="5"></line>
                       <polyline points="5 12 12 5 19 12"></polyline>
                    </svg>
@@ -68,7 +71,7 @@ export function RouteMap({ output, waypointWeather }: MapProps) {
                </div>
              `;
              customIcon = L.divIcon({
-               className: 'bg-slate-900 border border-slate-700 rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(34,211,238,0.2)]',
+               className: `border rounded-full flex items-center justify-center shadow-lg ${isCritical ? 'bg-red-900/80 border-red-500 shadow-red-500/50' : 'bg-slate-900 border-slate-700 shadow-cyan-500/20'}`,
                html: windIconHtml,
                iconSize: [40, 40],
                iconAnchor: [20, 20],
@@ -90,6 +93,13 @@ export function RouteMap({ output, waypointWeather }: MapProps) {
                     Lat: {wp.latDecl.toFixed(4)}°<br/>
                     Lon: {wp.lonDecl.toFixed(4)}°
                   </div>
+                  {isCritical && (
+                    <div className="mt-1 text-[10px] bg-red-100 text-red-800 font-bold p-1 rounded border border-red-300">
+                      {wpDetail.critical.flags.map((f: string) => (
+                         <div key={f} className="flex items-center gap-1">⚠ {f}</div>
+                      ))}
+                    </div>
+                  )}
                   {w && (
                     <div className="mt-2 text-[10px] bg-slate-100 p-1 rounded">
                       <div className="font-bold mb-1">Weather Context</div>

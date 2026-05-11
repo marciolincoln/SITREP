@@ -2,7 +2,7 @@ import { useState, useMemo, ChangeEvent, useEffect } from 'react';
 import { Anchor, Navigation, Send, Hash, FileSymlink, Settings, MapPin, Calculator, Copy, Check, Wind, Waves, Compass, Activity, Zap, BookOpen, Save, Trash, Plus } from 'lucide-react';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
-import { generateSistramPlan, ShipData, GeneratorOutput, PT_MONTHS, calculateMaxSOG, haversine } from './lib/sistram';
+import { generateSistramPlan, ShipData, GeneratorOutput, PT_MONTHS, calculateMaxSOG, haversine, evaluateCriticalSituations } from './lib/sistram';
 import { getWaypointWeather, WeatherData } from './lib/weather';
 import { RouteMap } from './components/MapComponent';
 import { EccodaxLogo } from './components/EccodaxLogo';
@@ -23,6 +23,8 @@ export default function App() {
     draft: 8.1,
     windArea: 1000,
     rpm: 92,
+    rollingPeriod: 15,
+    lpp: 200,
   });
 
   const [savedProfiles, setSavedProfiles] = useState<Record<string, ShipData>>({});
@@ -165,6 +167,9 @@ export default function App() {
     let totalDist = 0;
     let ok = true;
     
+    // We add evaluateCriticalSituations
+    const wpDetails: any[] = [{ maxSog: null, critical: null }];
+
     for (let i = 1; i < output.waypoints.length; i++) {
         const prev = output.waypoints[i-1];
         const curr = output.waypoints[i];
@@ -190,6 +195,10 @@ export default function App() {
         if (maxSog <= 0) {
            ok = false; break;
         }
+
+        // Evaluate critical conditions
+        const critical = w.waveDirection !== null ? evaluateCriticalSituations(shipData, maxSog, curr.bearingFromPrev, w.waveDirection || 0, w.wavePeriod || 8.1, w.waveHeight || 0) : null;
+        wpDetails.push({ maxSog, critical });
         
         totalDist += d_n;
         sum_d_n_over_sog += (d_n / maxSog);
@@ -213,7 +222,8 @@ export default function App() {
        weightedTotalEnrouteTime,
        etaUtcEnv,
        etaLocalEnv,
-       totalDist
+       totalDist,
+       wpDetails
     };
 
   }, [output, waypointWeather, shipData, times.etd, times.etdZone]);
@@ -295,10 +305,12 @@ export default function App() {
                   { id: 'medical', label: 'Medical Resources', type: 'text' },
                   { id: 'dep_port', label: 'Departure Port (G)', type: 'text' },
                   { id: 'arr_port', label: 'Arrival Port (I)', type: 'text' },
-                  { id: 'disp', label: 'Disp', type: 'number' },
-                  { id: 'draft', label: 'Draft', type: 'number' },
-                  { id: 'windArea', label: 'WindArea', type: 'number' },
+                  { id: 'disp', label: 'Disp (t)', type: 'number' },
+                  { id: 'draft', label: 'Draft (m)', type: 'number' },
+                  { id: 'windArea', label: 'WindArea (m²)', type: 'number' },
                   { id: 'rpm', label: 'RPM', type: 'number' },
+                  { id: 'rollingPeriod', label: 'RollingPeriod (Tr) (s)', type: 'number' },
+                  { id: 'lpp', label: 'LPP (m)', type: 'number' },
                 ].map(field => (
                   <div key={field.id} className="flex flex-col gap-1">
                     <label className="text-[10px] font-bold text-slate-500 uppercase block tracking-widest">
@@ -441,7 +453,7 @@ export default function App() {
                   <Compass className="w-4 h-4 text-cyan-500" />
                   <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Geospatial Overview</h2>
                 </div>
-                <RouteMap output={output} waypointWeather={waypointWeather} />
+                <RouteMap output={output} waypointWeather={waypointWeather} analytics={analytics} />
               </section>
             )}
 
@@ -554,10 +566,15 @@ export default function App() {
                  <div className="p-4 flex flex-col gap-4 overflow-y-auto max-h-[600px] scrollbar-thin scrollbar-thumb-emerald-900/50 scrollbar-track-transparent">
                     {output.waypoints.map((wp, idx) => {
                       const weather = waypointWeather[idx];
+                      const wpDetail = analytics?.wpDetails?.[idx];
+                      const isCritical = wpDetail?.critical?.flags?.length > 0;
                       
                       let warningColor = 'text-slate-400';
                       let suggestion = '';
-                      if (weather && typeof weather.waveHeight === 'number') {
+                      if (isCritical) {
+                        warningColor = 'text-red-400';
+                        suggestion = 'CRITICAL CONDITION MET. Immediate review of heading and speed profiles required.';
+                      } else if (weather && typeof weather.waveHeight === 'number') {
                         if (weather.waveHeight > 3) {
                           warningColor = 'text-red-400';
                           suggestion = 'Heavy seas. Consider speed reduction or routing adjustment to minimize slamming.';
@@ -571,12 +588,17 @@ export default function App() {
                       }
 
                       return (
-                        <div key={idx} className="flex flex-col gap-2 p-3 bg-black/20 rounded border border-slate-800/50 hover:border-emerald-900/50 transition-colors">
+                        <div key={idx} className={`flex flex-col gap-2 p-3 bg-black/20 rounded border ${isCritical ? 'border-red-900/50 hover:border-red-500/50' : 'border-slate-800/50 hover:border-emerald-900/50'} transition-colors`}>
                           <div className="flex items-center justify-between">
-                            <span className="text-xs font-bold text-cyan-400 font-mono">
+                            <span className={`text-xs font-bold ${isCritical ? 'text-red-400' : 'text-cyan-400'} font-mono`}>
                               {wp.type === 'G' ? 'Waypoint 1 (Dep)' : wp.type === 'I' ? `Waypoint ${idx + 1} (Arr)` : `Waypoint ${idx + 1}`}
                             </span>
-                            <div className="flex gap-3 items-center">
+                            <div className="flex flex-wrap gap-2 md:gap-3 items-center">
+                              {isCritical && wpDetail.critical.flags.map((f: string) => (
+                                <span key={f} className="text-[10px] bg-red-900/60 text-red-200 font-bold px-2 py-0.5 rounded border border-red-700/50 truncate">
+                                  {f}
+                                </span>
+                              ))}
                               {wp.bearingFromPrev !== undefined && (
                                 <span className="text-[10px] text-emerald-400 font-mono font-bold" title="Rumo em relação ao Norte Verdadeiro (RV)">
                                   RV: {Math.round(wp.bearingFromPrev).toString().padStart(3, '0')}°

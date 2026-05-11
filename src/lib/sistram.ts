@@ -11,6 +11,8 @@ export interface ShipData {
   draft: number;
   windArea: number;
   rpm: number;
+  rollingPeriod?: number;
+  lpp?: number;
 }
 
 export interface Waypoint {
@@ -290,4 +292,55 @@ export function generateSistramPlan(
     console.error(e);
     return null;
   }
+}
+
+export interface CriticalConditions {
+  SROLL: boolean;
+  PROLL: boolean;
+  HWATACK: boolean;
+  SRIDING: boolean;
+  flags: string[];
+}
+
+export function evaluateCriticalSituations(
+  ship: ShipData,
+  speed: number, // knots
+  heading: number, // degrees
+  waveDir: number, // degrees
+  wavePeriod: number, // seconds
+  waveHeight: number // meters
+): CriticalConditions {
+  const flags: string[] = [];
+  const Tr = ship.rollingPeriod || 15;
+  const LPP = ship.lpp || 200;
+
+  // AngleHeadingWave (mu): Absolute angle between Heading and WaveDirection (degrees)
+  let diff = (waveDir - heading) % 360;
+  if (diff < 0) diff += 360;
+  const AngleHeadingWave = diff;
+
+  const Lw = (9.81 * Math.pow(wavePeriod, 2)) / (2 * Math.PI);
+  
+  // EncounterPeriod (Te)
+  const Te = (3 * Math.pow(wavePeriod, 2)) / (3 * wavePeriod + speed * Math.cos(AngleHeadingWave * (Math.PI / 180)));
+  
+  const ratio = Tr / Te;
+  const SROLL = ratio > 0.7 && ratio < 1.2;
+  if (SROLL) flags.push("SYNCHRONOUS ROLL");
+
+  const PROLL = ratio > 1.7 && ratio < 2.2;
+  if (PROLL) flags.push("PARAMETRIC ROLL");
+
+  const HWATACK = AngleHeadingWave > 130 && AngleHeadingWave < 230 &&
+                  Lw > 0.8 * LPP &&
+                  waveHeight > 0.04 * LPP &&
+                  (speed / wavePeriod > 1.2) && (speed / wavePeriod <= 2.8);
+  if (HWATACK) flags.push("HIGH WAVES ATTACK");
+
+  const SRIDING = AngleHeadingWave > 130 && AngleHeadingWave < 230 &&
+                  (speed / Math.sqrt(LPP)) >= 1.8 &&
+                  waveHeight >= 7.0;
+  if (SRIDING) flags.push("SURF RIDING");
+
+  return { SROLL, PROLL, HWATACK, SRIDING, flags };
 }
