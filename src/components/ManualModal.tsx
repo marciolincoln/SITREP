@@ -9,30 +9,25 @@ interface ManualModalProps {
 }
 
 const manualContent = `
-## Como funciona o planejamento de viagem com Inteligência Ambiental
+## Introdução
 
-O sistema utiliza os dados inseridos (navio e waypoints da rota original) em conjunto com previsões meteorológicas e oceanográficas avançadas para recalcular a viabilidade da rota e o horário de chegada esperado (EnviroETA).
+O **Trip Planner (SISTRAM Type 1)** é uma ferramenta essencial para a navegação moderna, projetado para fundir inteligência ambiental com dados físicos e dinâmicos de embarcações. No complexo cenário marítimo da atualidade, planejar uma rota não se resume apenas a traçar a menor distância entre dois pontos. É necessário otimizar recursos, prever perigos, reduzir emissões de carbono e garantir a integridade da carga, do navio e de toda sua tripulação. 
 
-### 1. Sequência de Utilização
-
-1. **Ship Static & Variable Data:** Preencha os dados do navio. Os dados varíaveis essenciais são:
-   - **Disp:** Deslocamento do navio (toneladas).
-   - **Draft:** Calado do navio (metros).
-   - **WindArea:** Área lateral ou frontal exposta à ação do vento (em $m^2$).
-   - **RPM:** Rotações por minuto do motor principal.
-2. **Temporal Details:** Defina o ETD base para partida.
-3. **Waypoint Sequence Paste:** Insira os waypoints da rota pretendida em formato padrão.
-4. **Cálculo da Rota:** O sistema processa os dados, conecta-se a provedores de dados meteoceanográficos em tempo real e emite o Planejamento.
+A importância deste sistema reside em sua capacidade de mitigar os riscos associados ao clima adverso, calculando em tempo real restrições oceanográficas e impactos dinâmicos ("Seakeeping") sobre o navio. Através dos módulos integrados de **Voyage Planner** e **Motion Simulator**, a plataforma proporciona maior segurança, precisão na projeção de horários de chegada (ETA) e eficiência energética.
 
 ---
 
-### 2. Route Environment Intelligence - Cálculos Matemáticos
+## Módulo: Voyage Planner
 
-A partir do segundo waypoint (WP2), calcula-se o **$SOG_{Max}(WP_n)$** para a perna (distância até o wp alvo), o qual determina a velocidade máxima esperada sobre a água.
+O Voyage Planner aplica cálculos hidrodinâmicos e ambientais a cada perna da rota (waypoints). A partir da resistência gerada por vento, correntes marítimas e ondas, estima a perda (ou ganho) de velocidade.
+
+### 1. Modelagem Matemática de Velocidade Máxima
+
+Para cada waypoint $n$, o sistema calcula a Velocidade Máxima Possível sobre a Água, denominada $SOG_{Max}(WP_n)$:
 
 $$SOG_{Max}(WP_n) = V_{base} + V_{corr} + V_{vento} + V_{ondas}$$
 
-A fórmula completa se traduz em:
+A equação expandida é definida por:
 
 $$
 \\begin{aligned}
@@ -43,33 +38,54 @@ SOG_{Max}(WP_n) & = \\left(23.2 - 0.36 \\cdot (Draft - 8.1)^2 - 0.00058 \\cdot (
 \\end{aligned}
 $$
 
-#### Descrição Detalhada das Variáveis
-*   **COG (Course Over Ground):** Rumo Verdadeiro entre o waypoint anterior e o waypoint $n$.
-*   **CurrentSpeed:** Velocidade da corrente marítima local ($n\\acute{o}s$).
-*   **CurrentDir:** Direção da corrente marítima ($graus$).
-*   **WindSpeed:** Velocidade do vento ($n\\acute{o}s$).
-*   **WindDir:** Direção do vento ($graus$).
-*   **WaveHeight:** Altura significativa da onda ($metros$).
-*   **WaveDir:** Direção de propagação das ondas ($graus$).
-*   **WavePeriod:** Período de pico das ondas ($segundos$).
+#### Componentes
+- **Rendimento Base no Casco:** Determinado pelo Deslocamento (Disp), Calado (Draft) e propulsão mecânica (RPM).
+- **Corrente:** $CurrentSpeed \\cdot \\cos(\\text{COG} - CurrentDir)$. Compensa ou deduz velocidade caso a corrente empurre contra ou a favor do deslocamento.
+- **Vento:** Atrito aerodinâmico calculado pela Área exposta (WindArea) e velocidade ao quadrado.
+- **Ondas:** Atrito hidrodinâmico de ressonância da altura significativa ($WaveHeight$) e Período de Pico ($WavePeriod$).
 
-#### Fatores da Equação
-A fórmula deduz atritos e perdas de potência no propulsor. 
-- A primeira parte calcula a velocidade base no casco reduzida pelo deslocamento e variação de calado.
-- Os fatores seguintes compensam correntes superficiais (contribuindo ou reduzindo velocidade diretamente), arrasto aerodinâmico pelo *WindArea* e resistência associada às ondas através de fator ressonante do período de pico.
+### 2. Analytics e Projeção de Tempo (EnviroETA)
 
----
-
-### 3. Voyage Analytics
-
-Após os trechos terem suas restrições ambientais calculadas, computa-se a média global:
+Baseado no somatório restritivo global dos ambientes de todos os Waypoints, é estabelecida uma média de deslocamento:
 
 $$SOG_{avg\\_max} = \\frac{\\sum_{n=1}^{k} d_n}{\\sum_{n=1}^{k} \\left( \\frac{d_n}{SOG_{Max}(WP_n)} \\right)}$$
 
-Onde $d_n$ é a distância de cada perna.
-Baseado nesse fator de restrição final, o sistema propõe:
-- **Weighted Total Enroute Time:** $Total Distance / SOG_{avg\\_max}$
-- **Proposed ETA (EnviroETA):** Fator horário projetado pelo deslocamento ao longo de toda a rota sob efeito do ambiente imposto. Calculado sobre a longitude do alvo (Time Zone).
+Com as perdas consolidadas, o sistema projeta o **Predicted ETA** compensando fuso horários ($Time Zones$), permitindo estimativas altamente confiáveis de atracação.
+
+---
+
+## Módulo: Motion Simulator
+
+O Simulador de Movimento (Motion Simulator) analisa zonas de risco e ressonância de estabilidade. Ele gera uma malha topológica polar onde são cruzados os perfis do navio com as especificidades do mar em determinada perna, para avisar sobre fenômenos perigosos.
+
+### 1. Eixo Dinâmico: Encontro Navio / Onda
+
+A interação entre o navio em movimento e o sistema de ondas forma a base de avaliação:
+- **Ângulo de Ataque da Onda ($\\mu$):** É calculado a partir da diferença entre o rumo do navio (Heading) e a direção da onda.
+  $$\\mu = (Heading - WaveDir + 360) \\pmod{360}$$
+- **Comprimento da Onda ($L_w$):** Assumindo ondas em águas profundas ($g = 9.81 m/s^2$):
+  $$L_w = \\frac{g \\cdot T_w^2}{2\\pi}$$
+- **Período de Encontro ($T_e$):** Intervalo aparente de tempo em que as frentes de onda atingem o casco:
+  $$T_e = \\frac{3 \\cdot T_w^2}{3 \\cdot T_w + V \\cdot \\cos(\\mu)}$$
+
+### 2. Diagnóstico de Condições Críticas
+
+Com base em critérios normativos da IMO / IACS (Organização Marítima Internacional), quatro principais fenômenos destrutivos são mapeados:
+
+- **Balanço Sincronizado (Synchronous Roll):** Ocorre quando o período de encontro se iguala ao próprio período de balanço natural do navio ($T_r$).
+  $$\\text{Condição: } 0.7 < \\frac{T_r}{T_e} < 1.2$$
+- **Balanço Paramétrico (Parametric Roll):** Ocorre em mar de proa ou popa devido às contínuas variações na estabilidade estática.
+  $$\\text{Condição: } 1.7 < \\frac{T_r}{T_e} < 2.2$$
+- **Ataque por Ondas Altas (High Waves Attack):** Risco de falha estrutural com alagamento.
+  $$\\text{Condição: } 130^\\circ < \\mu < 230^\\circ \\;\\text{ e }\\; L_w > 0.8 L_{pp} \\;\\text{ e }\\; H_s > 0.04 L_{pp}$$
+- **Surf Riding & Broaching-to:** O navio passa a viajar na mesma velocidade da onda, perdendo controle do leme e podendo ser torcido lateralmente.
+  $$\\text{Condição: } 130^\\circ < \\mu < 230^\\circ \\;\\text{ e }\\; \\frac{V}{\\sqrt{L_{pp}}} \\ge 1.8 \\;\\text{ e }\\; H_s \\ge 7.0m$$
+
+### 3. Estimativa de Ângulo Máximo de Balanço
+
+Uma aproximação teórica utilizada na validação de forças laterais e fixação de cargas (Lashing) é dada por:
+$$ \\theta_{max} \\approx 0.466 \\cdot \\left( 1.25 - \\frac{0.60}{\\sqrt{GM}} \\right) \\text{ em (radianos)} $$
+A tela exibe esse valor para orientar decisões críticas de manobra (Trade-offs) em situações de mares adversos.
 `;
 
 export function ManualModal({ onClose }: ManualModalProps) {
