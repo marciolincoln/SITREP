@@ -10,6 +10,7 @@ interface PolarSimulatorProps {
   waveDir: number;
   wavePeriod: number;
   waveHeight: number;
+  forceSafe?: boolean;
 }
 
 export function PolarSimulator({
@@ -22,6 +23,7 @@ export function PolarSimulator({
   waveDir,
   wavePeriod,
   waveHeight,
+  forceSafe,
 }: PolarSimulatorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState<{ text: string; color: string }>({ text: 'STATUS: SAFE', color: 'text-emerald-400' });
@@ -64,7 +66,10 @@ export function PolarSimulator({
     for (let s = 0; s <= 25; s++) {
       fGrid[s] = [];
       for (let a = 0; a < 360; a++) {
-        if (grid[s][a] === 1) {
+        if (forceSafe) {
+          fGrid[s][a] = 0;
+          cGrid[s][a] = "SAFE";
+        } else if (grid[s][a] === 1) {
           fGrid[s][a] = 1;
         } else {
           let adjRed = false;
@@ -94,7 +99,7 @@ export function PolarSimulator({
       }
     }
     return { finalGrid: fGrid, conditionGrid: cGrid };
-  }, [trueCourse, gm, rollingPeriod, lpp, waveDir, wavePeriod, waveHeight]);
+  }, [trueCourse, gm, rollingPeriod, lpp, waveDir, wavePeriod, waveHeight, forceSafe]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

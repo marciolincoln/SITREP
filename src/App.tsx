@@ -60,7 +60,7 @@ export default function App() {
     dep_port: "SANTOS",
     arr_port: "ROSARIO",
     medical: "NURSE-ENFERMEIRO",
-    mmsi: "710000200",
+    mmsi: "710027240",
     disp: 50000,
     draft: 8.1,
     windArea: 1000,
@@ -1227,6 +1227,7 @@ export default function App() {
                       waveDir={simInputs.waveDirection}
                       wavePeriod={simInputs.wavePeriod}
                       waveHeight={simInputs.waveHeight}
+                      forceSafe={!simResult.SROLL && !simResult.PROLL && !simResult.HWATACK && !simResult.SRIDING}
                     />
                   </div>
                 </div>

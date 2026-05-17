@@ -315,14 +315,18 @@ export function evaluateCriticalSituations(
   const LPP = ship.lpp || 200;
 
   // AngleHeadingWave (mu): Absolute angle between Heading and WaveDirection (degrees)
-  let diff = (waveDir - heading) % 360;
-  if (diff < 0) diff += 360;
+  let diff = (heading - waveDir + 360) % 360;
   const AngleHeadingWave = diff;
 
   const Lw = (9.81 * Math.pow(wavePeriod, 2)) / (2 * Math.PI);
   
   // EncounterPeriod (Te)
-  const Te = (3 * Math.pow(wavePeriod, 2)) / (3 * wavePeriod + speed * Math.cos(AngleHeadingWave * (Math.PI / 180)));
+  const denom = 3 * wavePeriod + speed * Math.cos(AngleHeadingWave * (Math.PI / 180));
+  let Te = 999;
+  if (Math.abs(denom) > 0.001) {
+    Te = (3 * Math.pow(wavePeriod, 2)) / denom;
+    if (Te < 0) Te = 999;
+  }
   
   const ratio = Tr / Te;
   const SROLL = ratio > 0.7 && ratio < 1.2;
