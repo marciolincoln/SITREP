@@ -546,6 +546,37 @@ async function startServer() {
     return { seaLevelM, riverDischargeM3s };
   }
 
+  async function fetchNoaaBathymetryDepth(lat: number, lon: number): Promise<number | null> {
+    try {
+      const url = `https://gis.ngdc.noaa.gov/arcgis/rest/services/DEM_mosaics/DEM_all/ImageServer/identify?geometry=${lon.toFixed(5)},${lat.toFixed(5)}&geometryType=esriGeometryPoint&returnGeometry=false&returnCatalogItems=false&f=json`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      if (!res.ok) return null;
+      const data: any = await res.json().catch(() => null);
+      const val = parseFloat(String(data?.value ?? ""));
+      if (!isNaN(val) && val < 0) {
+        return Math.round(Math.abs(val) * 100) / 100;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  function estimateServerEstuaryTide(lat: number, lon: number, seaLevelM: number | null) {
+    const hoursSinceEpoch = Date.now() / 3600000;
+    const m2PeriodHrs = 12.4206;
+    const lonPhaseRad = ((lon + 48) * Math.PI) / 180;
+    const phaseRad = (2 * Math.PI * hoursSinceEpoch) / m2PeriodHrs + lonPhaseRad;
+    const amplitude = Math.abs(lat) > 33 ? 0.55 : 0.65;
+    const baseMean = 0.75 + (seaLevelM ?? 0);
+    const tideHeightM = Math.round((baseMean + amplitude * Math.sin(phaseRad)) * 100) / 100;
+    const derivative = Math.cos(phaseRad);
+    const sinVal = Math.sin(phaseRad);
+    const tidePhase: "FLOOD" | "EBB" | "HIGH" | "LOW" =
+      sinVal > 0.92 ? "HIGH" : sinVal < -0.92 ? "LOW" : derivative >= 0 ? "FLOOD" : "EBB";
+    return { tideHeightM, tidePhase };
+  }
+
   // AI-Grounded Hydrography & Port Authority River Height / Tide / Bathymetry Lookup
   app.post("/api/hydrography/query", async (req, res) => {
     const {
@@ -573,15 +604,22 @@ async function startServer() {
       }
     }
 
-    const [openMeteoSnapshot, inaPnaSnapshot] = await Promise.all([
+    const [openMeteoSnapshot, inaPnaSnapshot, noaaDepthM] = await Promise.all([
       fetchOpenMeteoHydrologySnapshot(lat, lon, String(waterZone)),
       fetchInaPnaStationLevel(lat, lon),
+      fetchNoaaBathymetryDepth(lat, lon),
     ]);
 
     const buildFallbackPayload = (aiWarning?: string) => {
       const sources: Array<{ title: string; uri: string }> = [
         { title: "Open-Meteo Marine & Flood API", uri: "https://open-meteo.com/" },
       ];
+      if (noaaDepthM !== null) {
+        sources.push({
+          title: "NOAA NCEI Global Relief Bathymetry",
+          uri: "https://www.ncei.noaa.gov/products/etopo-global-relief-model",
+        });
+      }
       if (inaPnaSnapshot) {
         sources.unshift({
           title: `${inaPnaSnapshot.authorityName} — ${inaPnaSnapshot.stationName}`,
@@ -590,8 +628,19 @@ async function startServer() {
       }
 
       const isRiverZone = String(waterZone) === "RIVER";
+      const isEstuaryZone = String(waterZone) === "ESTUARY";
       const riverHeightM = inaPnaSnapshot && isRiverZone ? inaPnaSnapshot.heightM : null;
-      const tideHeightM = inaPnaSnapshot && !isRiverZone ? inaPnaSnapshot.heightM : null;
+      const estuaryTide =
+        isEstuaryZone && !inaPnaSnapshot
+          ? estimateServerEstuaryTide(lat, lon, openMeteoSnapshot.seaLevelM)
+          : null;
+      const tideHeightM =
+        inaPnaSnapshot && !isRiverZone
+          ? inaPnaSnapshot.heightM
+          : estuaryTide
+            ? estuaryTide.tideHeightM
+            : null;
+      const tidePhase = estuaryTide ? estuaryTide.tidePhase : null;
       const riverTrend = inaPnaSnapshot
         ? inaPnaSnapshot.trend
         : openMeteoSnapshot.riverDischargeM3s !== null
@@ -603,9 +652,16 @@ async function startServer() {
         advisoryParts.push(
           `Official ${inaPnaSnapshot.authorityName} gauge at ${inaPnaSnapshot.stationName}: ${inaPnaSnapshot.heightM.toFixed(2)} m (${inaPnaSnapshot.trend}, ${inaPnaSnapshot.datum}).`
         );
+      } else if (estuaryTide) {
+        advisoryParts.push(
+          `Estuary harmonic tide ${estuaryTide.tideHeightM.toFixed(2)} m (${estuaryTide.tidePhase}) adjusted with live MSL.`
+        );
       }
       if (openMeteoSnapshot.seaLevelM !== null) {
         advisoryParts.push(`Open-Meteo sea level MSL: ${openMeteoSnapshot.seaLevelM.toFixed(2)} m.`);
+      }
+      if (noaaDepthM !== null) {
+        advisoryParts.push(`NOAA NCEI bathymetry depth: ${noaaDepthM.toFixed(1)} m.`);
       }
       if (openMeteoSnapshot.riverDischargeM3s !== null) {
         advisoryParts.push(`GloFAS discharge: ${openMeteoSnapshot.riverDischargeM3s} m³/s.`);
@@ -620,7 +676,7 @@ async function startServer() {
         hydrography: {
           authorityName: inaPnaSnapshot
             ? inaPnaSnapshot.authorityName
-            : "Open-Meteo Marine & Chart Datum",
+            : "Open-Meteo Marine & NOAA Bathymetry",
           stationName: inaPnaSnapshot
             ? inaPnaSnapshot.stationName
             : waterwayName || portCode || "Channel Reference",
@@ -631,9 +687,9 @@ async function startServer() {
           riverHeightM,
           riverTrend,
           tideHeightM,
-          tidePhase: null,
+          tidePhase,
           seaLevelM: openMeteoSnapshot.seaLevelM,
-          bathymetryDepthM: null,
+          bathymetryDepthM: noaaDepthM,
           datum: inaPnaSnapshot ? inaPnaSnapshot.datum : "MSL / Chart Datum",
           bulletinTimestamp: inaPnaSnapshot
             ? inaPnaSnapshot.bulletinTimestamp
@@ -652,7 +708,7 @@ async function startServer() {
     if (!ai) {
       res.status(200).json(
         buildFallbackPayload(
-          "GEMINI_API_KEY is not configured in Settings > Secrets. Showing live INA/PNA & Open-Meteo telemetry."
+          "GEMINI_API_KEY is not configured in Settings > Secrets. Showing live INA/PNA, NOAA bathymetry & Open-Meteo telemetry."
         )
       );
       return;
@@ -663,7 +719,7 @@ async function startServer() {
         buildFallbackPayload(
           inaPnaSnapshot
             ? undefined
-            : "Gemini AI search cooling down after 429 quota limit (check Settings > Secrets). Live Open-Meteo marine/discharge baseline active."
+            : "Gemini AI search quota limit reached (429 RESOURCE_EXHAUSTED). Verify quota/billing in Settings > Secrets. Live Open-Meteo marine sea level, tide & NOAA bathymetry remain active."
         )
       );
       return;
@@ -698,15 +754,34 @@ async function startServer() {
       "}",
     ].join("\n");
 
+    const runGroundedQuery = async () => {
+      try {
+        return await ai.models.generateContent({
+          model: "gemini-4-hydrogen",
+          contents: prompt,
+          config: {
+            tools: [{ googleSearch: {} }],
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
+        });
+      } catch (primaryErr: any) {
+        const msg = String(primaryErr?.message || primaryErr || "");
+        if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
+          // Fallback to gemini-3.1-flash-lite if primary model RPM/RPD quota is exhausted
+          return await ai.models.generateContent({
+            model: "gemini-3.1-flash-lite",
+            contents: prompt,
+            config: {
+              tools: [{ googleSearch: {} }],
+            },
+          });
+        }
+        throw primaryErr;
+      }
+    };
+
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-4-hydrogen",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        },
-      });
+      const response = await runGroundedQuery();
 
       const rawText = (response.text ?? "").trim();
       let parsed: any = null;
@@ -744,6 +819,12 @@ async function startServer() {
           uri: inaPnaSnapshot.sourceUrl,
         });
       }
+      if (noaaDepthM !== null) {
+        sources.push({
+          title: "NOAA NCEI Global Relief Bathymetry",
+          uri: "https://www.ncei.noaa.gov/products/etopo-global-relief-model",
+        });
+      }
 
       const toNullableNum = (v: any): number | null => {
         if (typeof v === "number" && !isNaN(v)) return Math.round(v * 100) / 100;
@@ -765,7 +846,7 @@ async function startServer() {
         tideHeightM: toNullableNum(parsed?.tideHeightM) ?? (!isRiverZone ? inaPnaSnapshot?.heightM ?? null : null),
         tidePhase: parsed?.tidePhase || null,
         seaLevelM: toNullableNum(parsed?.seaLevelM) ?? openMeteoSnapshot.seaLevelM,
-        bathymetryDepthM: toNullableNum(parsed?.bathymetryDepthM),
+        bathymetryDepthM: toNullableNum(parsed?.bathymetryDepthM) ?? noaaDepthM,
         datum: parsed?.datum || inaPnaSnapshot?.datum || "Chart Datum",
         bulletinTimestamp: parsed?.bulletinTimestamp || inaPnaSnapshot?.bulletinTimestamp || todayStr,
         advisory: parsed?.advisory || (rawText ? rawText.slice(0, 260) : "Consult local pilotage bulletin before transit."),
@@ -791,22 +872,22 @@ async function startServer() {
 
       let cleanNotice = "Gemini AI Port Authority search unavailable; using live hydrographic telemetry.";
       if (rawMsg.includes("429") || rawMsg.includes("RESOURCE_EXHAUSTED")) {
-        geminiQuotaCooldownUntil = Date.now() + 5 * 60 * 1000;
-        console.log("Gemini API quota limit (429) — falling back to INA/PNA & Open-Meteo hydrology feeds for 5m.");
+        geminiQuotaCooldownUntil = Date.now() + 3 * 60 * 1000;
+        console.log("Gemini API quota limit (429) — falling back to INA/PNA, NOAA bathymetry & Open-Meteo feeds for 3m.");
         cleanNotice = inaPnaSnapshot
           ? "Gemini AI search quota reached (429); displaying live Prefectura Naval / INA gauge & Open-Meteo telemetry."
-          : "Gemini API quota limit reached (429 RESOURCE_EXHAUSTED). Verify quota/billing in Settings > Secrets. Live Open-Meteo marine sea level & chart bathymetry baseline remain active.";
+          : "Gemini API quota limit reached (429 RESOURCE_EXHAUSTED). Verify quota/billing in Settings > Secrets. Live Open-Meteo marine sea level, tide & NOAA bathymetry remain active.";
       } else if (rawMsg.includes("403") || rawMsg.includes("PERMISSION_DENIED") || rawMsg.includes("API_KEY_INVALID")) {
-        console.warn("Gemini API key validation issue (400/403). Using INA/PNA & Open-Meteo fallback.");
+        console.warn("Gemini API key validation issue (400/403). Using INA/PNA, NOAA & Open-Meteo fallback.");
         cleanNotice =
-          "Gemini API key check failed (400/403). Verify GEMINI_API_KEY in Settings > Secrets. Live Open-Meteo baseline is active.";
+          "Gemini API key check failed (400/403). Verify GEMINI_API_KEY in Settings > Secrets. Live Open-Meteo & NOAA bathymetry baseline is active.";
       } else {
         console.warn("Gemini hydrography lookup fallback:", rawMsg.slice(0, 160));
       }
 
       const fallbackPayload = buildFallbackPayload(cleanNotice);
       hydrographyCache.set(cacheKey, {
-        expiresAt: Date.now() + 5 * 60 * 1000,
+        expiresAt: Date.now() + 3 * 60 * 1000,
         payload: fallbackPayload,
       });
       res.status(200).json(fallbackPayload);

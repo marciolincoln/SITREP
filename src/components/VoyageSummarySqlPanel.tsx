@@ -14,6 +14,7 @@ import {
   Plus,
   Clock,
   Sparkles,
+  Info,
 } from "lucide-react";
 import { VesselPosition } from "../lib/ais";
 import {
@@ -304,8 +305,18 @@ export const VoyageSummarySqlPanel: React.FC<VoyageSummarySqlPanelProps> = ({
         </div>
 
         {hydrographyError && (
-          <div className="bg-amber-950/40 border border-amber-700/60 text-amber-200 px-3 py-2.5 rounded text-xs font-mono flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div
+            className={
+              latestHydrography
+                ? "bg-slate-950/70 border border-sky-800/60 text-slate-300 px-3 py-2.5 rounded text-xs font-mono flex items-start gap-2"
+                : "bg-amber-950/40 border border-amber-700/60 text-amber-200 px-3 py-2.5 rounded text-xs font-mono flex items-start gap-2"
+            }
+          >
+            {latestHydrography ? (
+              <Info className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            )}
             <span>{hydrographyError}</span>
           </div>
         )}
