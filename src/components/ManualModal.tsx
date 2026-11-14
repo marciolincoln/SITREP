@@ -52,6 +52,27 @@ $$SOG_{avg\\_max} = \\frac{\\sum_{n=1}^{k} d_n}{\\sum_{n=1}^{k} \\left( \\frac{d
 
 Com as perdas consolidadas, o sistema projeta o **Predicted ETA** compensando fuso horários ($Time Zones$), permitindo estimativas altamente confiáveis de atracação.
 
+### 3. Interoperabilidade, Exportação GPX / RT3, OpenSeaMap e Vetores Metocean
+O sistema oferece interoperabilidade completa com ecossistemas de navegação e ECDIS:
+- **Vetores Metocean Diretos no Mapa (OpenMeteo):** Sobreposição gráfica de vetores direcionais e codificação por cores para **Velocidade do Vento** (Escala Beaufort: Verde <10kn, Amarelo 10-20kn, Laranja 21-33kn, Vermelho 34-47kn, Roxo ≥48kn) e **Altura Significativa de Onda** (Escala Douglas: Ciano <1.25m, Amarelo 1.25-2.5m, Laranja 2.5-4.0m, Vermelho 4.0-6.0m, Roxo ≥6.0m). Inclui setas de fluxo orientadas em convenção física/meteorológica, comprimento proporcional à magnitude e legenda interativa.
+- **Integração OpenSeaMap (map.openseamap.org):** Cartografia náutica e auxílios à navegação abertos (faróis, boias, balizas, esquemas de separação de tráfego / TSS) com datum geodésico WGS84, sem necessidade de chaves de API proprietárias.
+- **Importação RT3:** Importa arquivos de rotas ECDIS em formato .rt3.
+- **Exportação GPX (GPS Exchange Format 1.1):** Exporta todos os waypoints da sequência em coordenadas geodésicas WGS84 com tags de waypoints, rotas planejadas e trajetos, prontos para importação em GPSs, plotters marítimos e softwares de navegação.
+
+### 4. Monitoramento de Embarcação e AIS MarineTraffic (Call Sign: PPKQ)
+O sistema incorpora monitoramento contínuo da posição e status do navio **MERCOSUL ITAJAI** (Indicativo de Chamada / Call Sign: **PPKQ**, MMSI: **710027240**):
+- **Telemetria Náutica em Tempo Real:** Acompanhamento contínuo de Velocidade no Fundo ($SOG$ em nós), Rumo no Fundo ($COG$ em graus), Proa Verdadeira ($HDG$ em graus giroscópios/verdadeiros), Calado ($Draft$) e coordenadas geodésicas WGS84.
+- **Cálculo de Distância Fora da Rota (Cross-Track Distance - XTD / XTE):** Utiliza trigonometria esférica geodésica para calcular a distância ortogonal mínima entre a posição atual do navio e a perna da rota planejada:
+  $$d_{xt} = \\arcsin\\left(\\sin(\\delta_{13}) \\cdot \\sin(\\theta_{13} - \\theta_{12})\\right) \\cdot R$$
+  Onde $\\delta_{13}$ é a distância angular do início da perna ao navio, $\\theta_{13}$ o azimute ao navio, $\\theta_{12}$ o azimute da perna da rota, e $R$ o raio da Terra em milhas náuticas ($3440.065\\text{ NM}$). O sistema indica desvios para Boreste (Starboard / Positivo) ou Bombordo (Port / Negativo).
+- **Corredor de Alerta de Segurança:**
+  - 🟢 **Verde (< 0.5 NM):** No centro da derrota planejada.
+  - 🟡 **Amarelo (0.5 a 1.0 NM):** Desvio moderado da rota.
+  - 🔴 **Alerta Vermelho (> 1.0 NM):** Desvio crítico fora da derrota programada com alerta visual piscante.
+- **Vetor Preditor de 6 Minutos:** Projeta graficamente no mapa o deslocamento náutico futuro do navio em 6 minutos ($0.1 \\cdot SOG\\text{ NM}$) ao longo do rumo atual ($COG$).
+- **Rastro Histórico (Breadcrumbs):** Registro em tempo real das posições AIS anteriores do navio.
+- **Conectividade MarineTraffic:** Permite inserção opcional de chave de API MarineTraffic (PS05) nas configurações do HUD ou operação contínua com simulador cinemático de alta fidelidade ao longo da costa brasileira.
+
 ---
 
 ## Módulo: Motion Simulator
